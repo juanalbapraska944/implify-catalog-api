@@ -20,16 +20,23 @@ async function loadProducts(req) {
   return items;
 }
 
+// ---------- utils ----------
 function norm(v){ return (v ?? "").toString().trim(); }
 function lower(v){ return norm(v).toLowerCase(); }
+function toNum(x){
+  if (x == null) return null;
+  const s = String(x).replace(',', '.').replace(/[^\d.]/g, '');
+  const n = parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+}
+function approxEq(a,b){
+  const na = toNum(a), nb = toNum(b);
+  return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na-nb) < 0.11; // ~0.1 mm tolerance
+}
 function normPlatform(p){
   const s = norm(p).toUpperCase().replace(/\s+/g,"");
   const m = s.match(/^P?(\d{1,2})$/);
   return m ? `P${String(parseInt(m[1],10)).padStart(2,"0")}` : (s || null);
-}
-function approxEq(a,b){
-  const na = Number(a), nb = Number(b);
-  return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na-nb) < 0.11; // ~0.1 mm tolerance
 }
 function parseRotation(val){
   const s = lower(val);
@@ -37,6 +44,42 @@ function parseRotation(val){
   if (/\b(with|mit|ja|yes|rotation|r-?schutz)\b/.test(s)) return "with";
   if (/\b(without|ohne|nein|no)\b/.test(s)) return "without";
   return ""; // unknown → no filter
+}
+
+// derive prosthetic diameter (part) from field already parsed to number if present
+function getPartDiameter(r){
+  if (r.diameter_mm != null) return toNum(r.diameter_mm);
+  // fallback: try to parse from a string field if present in JSONL
+  if (r.diameter_text) return toNum(r.diameter_text);
+  return null;
+}
+
+// Heuristic: derive implant connection size (mm)
+// Priority: explicit platform field -> parse from name -> null
+function deriveConnectionMM(r){
+  // 1) platform connection (if present)
+  let cand = toNum(r.Platfform_Prothetikdurchmesser || r.plattform_prothetikdurchmesser || r.platform_prothetikdurchmesser);
+  if (cand) return cand;
+
+  // 2) parse from product names ("Ext Hex, 4,1 mm", "Certain, 5,0 mm", etc.)
+  const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
+    .map(norm).filter(Boolean).join(" | ");
+
+  // collect mm numbers in name
+  const mm = [];
+  name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { mm.push(toNum(m)); return m; });
+
+  // remove obvious prosthetic diameter if known
+  const partDia = getPartDiameter(r);
+  const list = mm.filter(v => !approxEq(v, partDia));
+
+  if (list.length === 1) return list[0];     // single non-prosthetic number → treat as connection
+  if (!partDia && mm.length === 1) return mm[0]; // only one number overall
+  if (list.length > 1) return list[0];       // fallback: first remaining
+  // last resort: if nothing left but we had one number equal to part dia, reuse it (better than null)
+  if (mm.length === 1) return mm[0];
+
+  return null;
 }
 
 export default async function handler(req) {
@@ -63,9 +106,7 @@ export default async function handler(req) {
     const abformung = lower(p.get("abformung"));        // "open" | "closed"
     const color = lower(p.get("color"));
     const rotation = parseRotation(p.get("rotationsschutz")); // "with" | "without" | ""
-
-    // fuzzy variants bucket
-    const variant = lower(p.get("variant"));
+    const variant = lower(p.get("variant"));            // fuzzy across ausfuehrung/rotationsschutz/zubehoer
 
     const limit = Math.max(1, Math.min(50, parseInt(p.get("limit") || "10", 10)));
     const platform = platformIn === "universal" ? "universal" : normPlatform(platformIn);
@@ -88,7 +129,8 @@ export default async function handler(req) {
       if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
       if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
 
-      if (connection && !approxEq(r.prothetik_diameter_mm, connection)) return false;   // implant connection size
+      const conn = deriveConnectionMM(r);
+      if (connection && !approxEq(conn, connection)) return false;                      // implant connection size
 
       if (abformung && lower(r.abformung) !== abformung) return false;
       if (color && lower(r.color) !== color) return false;
@@ -124,8 +166,8 @@ export default async function handler(req) {
       gingiva_mm: r.gingiva_mm ?? null,
       angulation_deg: r.angulation_deg ?? null,
 
-      // CONNECTION size
-      connection_mm: r.prothetik_diameter_mm ?? null,
+      // CONNECTION size (derived)
+      connection_mm: deriveConnectionMM(r),
 
       // Variants
       abformung: r.abformung || null,

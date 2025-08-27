@@ -45,40 +45,46 @@ function parseRotation(val){
   if (/\b(without|ohne|nein|no)\b/.test(s)) return "without";
   return ""; // unknown → no filter
 }
-
-// derive prosthetic diameter (part) from field already parsed to number if present
 function getPartDiameter(r){
-  if (r.diameter_mm != null) return toNum(r.diameter_mm);
-  // fallback: try to parse from a string field if present in JSONL
+  if (r.diameter_mm != null && r.diameter_mm !== "") return toNum(r.diameter_mm);
   if (r.diameter_text) return toNum(r.diameter_text);
   return null;
 }
 
-// Heuristic: derive implant connection size (mm)
-// Priority: explicit platform field -> parse from name -> null
-function deriveConnectionMM(r){
-  // 1) platform connection (if present)
+// Robust: derive implant CONNECTION size (mm) from platform fields / name
+function deriveConnectionMM(r, hintGingiva){
+  // 1) explicit platform connection if present
   let cand = toNum(r.Platfform_Prothetikdurchmesser || r.plattform_prothetikdurchmesser || r.platform_prothetikdurchmesser);
   if (cand) return cand;
 
-  // 2) parse from product names ("Ext Hex, 4,1 mm", "Certain, 5,0 mm", etc.)
+  // 2) parse from name, prioritizing segments that mention platform keywords
   const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
     .map(norm).filter(Boolean).join(" | ");
+  const parens = Array.from(name.matchAll(/\(([^)]+)\)/g)).map(m => m[1]);
+  const pools = parens.length ? parens : [name];
 
-  // collect mm numbers in name
   const mm = [];
-  name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { mm.push(toNum(m)); return m; });
+  const kw = /(ext\s*hex|certain|internal|external|eztetic|tsx|platform|hex)/i;
+  for (const seg of pools) {
+    if (kw.test(seg)) {
+      seg.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
+    }
+  }
+  if (!mm.length) {
+    name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
+  }
 
-  // remove obvious prosthetic diameter if known
+  // remove values that are really prosthetic diameter or gingiva height; keep plausible connections
   const partDia = getPartDiameter(r);
-  const list = mm.filter(v => !approxEq(v, partDia));
+  const hint = toNum(hintGingiva);
+  const filtered = mm.filter(v =>
+    (partDia==null || !approxEq(v, partDia)) &&
+    (hint==null || !approxEq(v, hint)) &&
+    v >= 3.0 && v <= 6.5 // plausible connection range
+  );
 
-  if (list.length === 1) return list[0];     // single non-prosthetic number → treat as connection
-  if (!partDia && mm.length === 1) return mm[0]; // only one number overall
-  if (list.length > 1) return list[0];       // fallback: first remaining
-  // last resort: if nothing left but we had one number equal to part dia, reuse it (better than null)
-  if (mm.length === 1) return mm[0];
-
+  if (filtered.length) return filtered[0];
+  if (!partDia && mm.length === 1) return mm[0];
   return null;
 }
 
@@ -129,7 +135,7 @@ export default async function handler(req) {
       if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
       if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
 
-      const conn = deriveConnectionMM(r);
+      const conn = deriveConnectionMM(r, gingiva);
       if (connection && !approxEq(conn, connection)) return false;                      // implant connection size
 
       if (abformung && lower(r.abformung) !== abformung) return false;
@@ -167,7 +173,7 @@ export default async function handler(req) {
       angulation_deg: r.angulation_deg ?? null,
 
       // CONNECTION size (derived)
-      connection_mm: deriveConnectionMM(r),
+      connection_mm: deriveConnectionMM(r, gingiva),
 
       // Variants
       abformung: r.abformung || null,

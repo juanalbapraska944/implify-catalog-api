@@ -1,3 +1,4 @@
+// api/facets.js
 export const config = { runtime: "edge", regions: ["fra1"] };
 
 let CACHE = { products: null };
@@ -34,11 +35,14 @@ function applyFilters(items, p) {
   const platformIn = p.get("platform");
   const group = lower(p.get("group"));
   const prodGroup = lower(p.get("product_group"));
-  const diameter = p.get("diameter_mm");
+
+  const diameter = p.get("diameter_mm");          // part's prosthetic diameter
   const length = p.get("length_mm");
   const gingiva = p.get("gingiva_mm");
   const angulation = p.get("angulation_deg");
-  const prosth = p.get("prothetik_diameter_mm"); // <-- NEW
+
+  const connection = p.get("connection_mm") || p.get("prothetik_diameter_mm"); // implant connection size
+
   const abformung = lower(p.get("abformung"));
   const color = lower(p.get("color"));
   const variant = lower(p.get("variant"));
@@ -61,7 +65,8 @@ function applyFilters(items, p) {
     if (length && !approxEq(r.length_mm, length)) return false;
     if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
     if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
-    if (prosth && !approxEq(r.prothetik_diameter_mm, prosth)) return false; // <-- NEW
+
+    if (connection && !approxEq(r.prothetik_diameter_mm, connection)) return false;
 
     if (abformung && lower(r.abformung) !== abformung) return false;
     if (color && lower(r.color) !== color) return false;
@@ -107,11 +112,15 @@ export default async function handler(req) {
       ]},
       product_group: { values: countValues(filtered, "product_group") },
       group: { values: countValues(filtered, "group") },
-      diameter_mm: { values: countValues(filtered, "diameter_mm", true) },
+
+      // NUMERIC facets
+      diameter_mm: { values: countValues(filtered, "diameter_mm", true) },           // part prosthetic diameter
       length_mm: { values: countValues(filtered, "length_mm", true) },
       gingiva_mm: { values: countValues(filtered, "gingiva_mm", true) },
       angulation_deg: { values: countValues(filtered, "angulation_deg", true) },
-      prothetik_diameter_mm: { values: countValues(filtered, "prothetik_diameter_mm", true) }, // <-- NEW
+      connection_mm: { values: countValues(filtered, "prothetik_diameter_mm", true) }, // implant connection
+
+      // ENUM facets
       abformung: { values: countValues(filtered, "abformung") },
       ausfuehrung: { values: countValues(filtered, "ausfuehrung") },
       rotationsschutz: { values: countValues(filtered, "rotationsschutz") },

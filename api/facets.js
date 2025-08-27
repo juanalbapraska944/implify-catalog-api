@@ -43,32 +43,41 @@ function parseRotation(val){
   if (/\b(without|ohne|nein|no)\b/.test(s)) return "without";
   return "";
 }
-
 function getPartDiameter(r){
-  if (r.diameter_mm != null) return toNum(r.diameter_mm);
+  if (r.diameter_mm != null && r.diameter_mm !== "") return toNum(r.diameter_mm);
   if (r.diameter_text) return toNum(r.diameter_text);
   return null;
 }
-
-function deriveConnectionMM(r){
+function deriveConnectionMM(r, hintGingiva){
   let cand = toNum(r.Platfform_Prothetikdurchmesser || r.plattform_prothetikdurchmesser || r.platform_prothetikdurchmesser);
   if (cand) return cand;
 
   const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
     .map(norm).filter(Boolean).join(" | ");
+  const parens = Array.from(name.matchAll(/\(([^)]+)\)/g)).map(m => m[1]);
+  const pools = parens.length ? parens : [name];
 
   const mm = [];
-  name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { 
-    const n = toNum(m); if (n != null) mm.push(n); return m; 
-  });
+  const kw = /(ext\s*hex|certain|internal|external|eztetic|tsx|platform|hex)/i;
+  for (const seg of pools) {
+    if (kw.test(seg)) {
+      seg.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
+    }
+  }
+  if (!mm.length) {
+    name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
+  }
 
   const partDia = getPartDiameter(r);
-  const list = mm.filter(v => !approxEq(v, partDia));
+  const hint = toNum(hintGingiva);
+  const filtered = mm.filter(v =>
+    (partDia==null || !approxEq(v, partDia)) &&
+    (hint==null || !approxEq(v, hint)) &&
+    v >= 3.0 && v <= 6.5
+  );
 
-  if (list.length === 1) return list[0];
+  if (filtered.length) return filtered[0];
   if (!partDia && mm.length === 1) return mm[0];
-  if (list.length > 1) return list[0];
-  if (mm.length === 1) return mm[0];
   return null;
 }
 
@@ -109,7 +118,7 @@ function applyFilters(items, p) {
     if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
     if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
 
-    const conn = deriveConnectionMM(r);
+    const conn = deriveConnectionMM(r, gingiva);
     if (connection && !approxEq(conn, connection)) return false;
 
     if (abformung && lower(r.abformung) !== abformung) return false;
@@ -153,26 +162,26 @@ export default async function handler(req) {
     const filtered = applyFilters(items, url.searchParams);
 
     const facets = {
-      platform: { values: countValues(filtered, "platform") },
-      platform_scope: { values: [
-        { value: "platform", count: filtered.filter(r => !!r.platform).length },
+      platform:        { values: countValues(filtered, "platform") },
+      platform_scope:  { values: [
+        { value: "platform",  count: filtered.filter(r => !!r.platform).length },
         { value: "universal", count: filtered.filter(r => !r.platform).length }
       ]},
-      product_group: { values: countValues(filtered, "product_group") },
-      group: { values: countValues(filtered, "group") },
+      product_group:   { values: countValues(filtered, "product_group") },
+      group:           { values: countValues(filtered, "group") },
 
       // NUMERIC facets
-      diameter_mm:   { values: countValues(filtered, "diameter_mm", true) },           // part prosthetic diameter
-      length_mm:     { values: countValues(filtered, "length_mm", true) },
-      gingiva_mm:    { values: countValues(filtered, "gingiva_mm", true) },
-      angulation_deg:{ values: countValues(filtered, "angulation_deg", true) },
-      connection_mm: { values: countValues(filtered, null, true, (r)=>deriveConnectionMM(r)) }, // derived implant connection
+      diameter_mm:     { values: countValues(filtered, "diameter_mm", true) },           // part prosthetic diameter
+      length_mm:       { values: countValues(filtered, "length_mm", true) },
+      gingiva_mm:      { values: countValues(filtered, "gingiva_mm", true) },
+      angulation_deg:  { values: countValues(filtered, "angulation_deg", true) },
+      connection_mm:   { values: countValues(filtered, null, true, (r)=>deriveConnectionMM(r, url.searchParams.get("gingiva_mm"))) }, // derived
 
       // ENUM facets
-      abformung:     { values: countValues(filtered, "abformung") },
-      ausfuehrung:   { values: countValues(filtered, "ausfuehrung") },
-      rotationsschutz:{ values: countValues(filtered, "rotationsschutz") },
-      color:         { values: countValues(filtered, "color") },
+      abformung:       { values: countValues(filtered, "abformung") },
+      ausfuehrung:     { values: countValues(filtered, "ausfuehrung") },
+      rotationsschutz: { values: countValues(filtered, "rotationsschutz") },
+      color:           { values: countValues(filtered, "color") },
     };
 
     return new Response(JSON.stringify({ facets }, null, 2), {

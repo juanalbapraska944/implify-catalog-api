@@ -32,8 +32,8 @@ function approxEq(a,b){
 function parseRotation(val){
   const s = lower(val);
   if (!s) return "";
-  if (["with","yes","mit","rotation","rotation lock","rotationsschutz","r-schutz"].some(k => s.includes(k))) return "with";
-  if (["without","no","ohne","kein","no rotation"].some(k => s.includes(k))) return "without";
+  if (/\b(with|mit|ja|yes|rotation|r-?schutz)\b/.test(s)) return "with";
+  if (/\b(without|ohne|nein|no)\b/.test(s)) return "without";
   return "";
 }
 
@@ -81,8 +81,8 @@ function applyFilters(items, p) {
 
     if (rotation) {
       const field = lower(r.rotationsschutz || "");
-      const isWith = field.includes("mit") || field.includes("with") || field.includes("rotation");
-      const isWithout = field.includes("ohne") || field.includes("without");
+      const isWith = /\b(mit|ja|with|rotation|r-?schutz)\b/.test(field);
+      const isWithout = /\b(ohne|nein|without)\b/.test(field);
       if (rotation === "with" && !isWith) return false;
       if (rotation === "without" && !isWithout) return false;
     }

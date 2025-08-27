@@ -175,7 +175,24 @@ export default async function handler(req) {
       length_mm:       { values: countValues(filtered, "length_mm", true) },
       gingiva_mm:      { values: countValues(filtered, "gingiva_mm", true) },
       angulation_deg:  { values: countValues(filtered, "angulation_deg", true) },
-      connection_mm:   { values: countValues(filtered, null, true, (r)=>deriveConnectionMM(r, url.searchParams.get("gingiva_mm"))) }, // derived
+      // Build a cleaned connection facet: drop values that equal gingiva or match current diameter facet
+const diaFacet = countValues(filtered, "diameter_mm", true);
+const diaSet = new Set(diaFacet.map(x => x.value)); // strings like "5.0","6.0"
+const gingivaHint = url.searchParams.get("gingiva_mm");
+
+let connFacet = countValues(filtered, null, true, (r)=>deriveConnectionMM(r, gingivaHint));
+connFacet = connFacet.filter(({ value }) => {
+  // drop if equals gingiva
+  if (gingivaHint && Math.abs(parseFloat(value) - parseFloat(gingivaHint)) < 0.11) return false;
+  // drop if equals any prosthetic diameter value
+  if (diaSet.has(value)) return false;
+  // keep plausible connectors only
+  const v = parseFloat(value);
+  return v >= 3.0 && v <= 6.5;
+});
+
+connection_mm: { values: connFacet },
+
 
       // ENUM facets
       abformung:       { values: countValues(filtered, "abformung") },

@@ -29,6 +29,13 @@ function approxEq(a,b){
   const na = Number(a), nb = Number(b);
   return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na-nb) < 0.11;
 }
+function parseRotation(val){
+  const s = lower(val);
+  if (!s) return "";
+  if (["with","yes","mit","rotation","rotation lock","rotationsschutz","r-schutz"].some(k => s.includes(k))) return "with";
+  if (["without","no","ohne","kein","no rotation"].some(k => s.includes(k))) return "without";
+  return "";
+}
 
 function applyFilters(items, p) {
   const q = lower(p.get("q"));
@@ -45,6 +52,7 @@ function applyFilters(items, p) {
 
   const abformung = lower(p.get("abformung"));
   const color = lower(p.get("color"));
+  const rotation = parseRotation(p.get("rotationsschutz"));
   const variant = lower(p.get("variant"));
 
   const platform = platformIn === "universal" ? "universal" : normPlatform(platformIn);
@@ -70,6 +78,14 @@ function applyFilters(items, p) {
 
     if (abformung && lower(r.abformung) !== abformung) return false;
     if (color && lower(r.color) !== color) return false;
+
+    if (rotation) {
+      const field = lower(r.rotationsschutz || "");
+      const isWith = field.includes("mit") || field.includes("with") || field.includes("rotation");
+      const isWithout = field.includes("ohne") || field.includes("without");
+      if (rotation === "with" && !isWith) return false;
+      if (rotation === "without" && !isWithout) return false;
+    }
 
     if (variant) {
       const blob = `${lower(r.ausfuehrung)} ${lower(r.rotationsschutz)} ${lower(r.zubehoer)}`;

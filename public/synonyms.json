@@ -1,0 +1,49 @@
+{
+  "attributes": {
+    "Plattform": "platform",
+    "Artikel_Kategorie": "group",
+    "Artikel_Name": "product_group",
+    "Artikelvariente_Durchmesser": "diameter_mm",
+    "Artikelvariente_Länge": "length_mm",
+    "Artikelvariente_Gingivahöhe": "gingiva_mm",
+    "Artikelvariante_Abformung": "abformung",
+    "Artikelvariante_Ausführung": "ausfuehrung",
+    "Artikelvariente_Rotationsschutz": "rotationsschutz",
+    "Artikelvariante_Zubehör": "zubehoer",
+    "Plattform_Farbe": "platform_color"
+  },
+  "values": {
+    "abformung": {
+      "offen": "open",
+      "geschlossen": "closed"
+    },
+    "ausfuehrung": {
+      "standard": "Standard",
+      "asc": "ASC"
+    },
+    "rotationsschutz": {
+      "mit": "with",
+      "ohne": "without"
+    },
+    "color": {
+      "gelb": "yellow",
+      "blau": "blue",
+      "grün": "green",
+      "gruen": "green",
+      "pink": "pink",
+      "rot": "red",
+      "violett": "violet",
+      "lila": "purple",
+      "schwarz": "black",
+      "weiß": "white",
+      "weiss": "white",
+      "silber": "silver"
+    }
+  },
+  "platform_alias_examples": [
+    "P6",
+    "P06",
+    "Certain 4,1 mm",
+    "Ext Hex 4,1 mm"
+  ]
+}

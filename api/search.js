@@ -6,17 +6,14 @@ async function loadProducts(req) {
   if (CACHE.products) return CACHE.products;
 
   const origin = new URL(req.url).origin;
-  // If your file lives at /public/products.jsonl, change the next line to `${origin}/public/products.jsonl`
-  const fileUrl = `${origin}/products.jsonl`;
+  const fileUrl = `${origin}/products.jsonl`; // file served from /public at site root
   const res = await fetch(fileUrl, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to load products.jsonl (${res.status})`);
 
   const text = await res.text();
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.startsWith("{"));
   const items = [];
-  for (const line of lines) {
-    try { items.push(JSON.parse(line)); } catch (_) { /* ignore bad lines */ }
-  }
+  for (const line of lines) { try { items.push(JSON.parse(line)); } catch (_) {} }
   if (!items.length) throw new Error("No products parsed");
   CACHE.products = items;
   return items;
@@ -31,7 +28,7 @@ function normPlatform(p){
 }
 function approxEq(a,b){
   const na = Number(a), nb = Number(b);
-  return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na-nb) < 0.11;
+  return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na-nb) < 0.11; // ~0.1 mm tolerance
 }
 
 export default async function handler(req) {
@@ -47,6 +44,7 @@ export default async function handler(req) {
     const length = p.get("length_mm");
     const gingiva = p.get("gingiva_mm");
     const angulation = p.get("angulation_deg");
+    const prosth = p.get("prothetik_diameter_mm"); // <-- NEW
     const abformung = lower(p.get("abformung"));
     const color = lower(p.get("color"));
     const variant = lower(p.get("variant"));
@@ -70,6 +68,7 @@ export default async function handler(req) {
       if (length && !approxEq(r.length_mm, length)) return false;
       if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
       if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
+      if (prosth && !approxEq(r.prothetik_diameter_mm, prosth)) return false; // <-- NEW
 
       if (abformung && lower(r.abformung) !== abformung) return false;
       if (color && lower(r.color) !== color) return false;
@@ -93,6 +92,7 @@ export default async function handler(req) {
       length_mm: r.length_mm ?? null,
       gingiva_mm: r.gingiva_mm ?? null,
       angulation_deg: r.angulation_deg ?? null,
+      prothetik_diameter_mm: r.prothetik_diameter_mm ?? null, // <-- NEW
       abformung: r.abformung || null,
       ausfuehrung: r.ausfuehrung || null,
       rotationsschutz: r.rotationsschutz || null,

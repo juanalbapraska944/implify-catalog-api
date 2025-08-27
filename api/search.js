@@ -7,8 +7,7 @@ async function loadProducts(req) {
   if (CACHE.products) return CACHE.products;
 
   const origin = new URL(req.url).origin;
-  // Your products.jsonl lives at site root because it's in /public
-  const fileUrl = `${origin}/products.jsonl`;
+  const fileUrl = `${origin}/products.jsonl`; // served from /public at site root
   const res = await fetch(fileUrl, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to load products.jsonl (${res.status})`);
 
@@ -32,17 +31,24 @@ function approxEq(a,b){
   const na = Number(a), nb = Number(b);
   return Number.isFinite(na) && Number.isFinite(nb) && Math.abs(na-nb) < 0.11; // ~0.1 mm tolerance
 }
+function parseRotation(val){
+  const s = lower(val);
+  if (!s) return "";
+  if (["with","yes","mit","rotation","rotation lock","rotationsschutz","r-schutz"].some(k => s.includes(k))) return "with";
+  if (["without","no","ohne","kein","no rotation"].some(k => s.includes(k))) return "without";
+  return ""; // unknown → no filter
+}
 
 export default async function handler(req) {
   try {
     const items = await loadProducts(req);
     const url = new URL(req.url), p = url.searchParams;
 
-    // Query params
+    // Text / identity
     const q = lower(p.get("q"));
     const platformIn = p.get("platform");
     const group = lower(p.get("group"));                // high-level category
-    const prodGroup = lower(p.get("product_group"));    // product group (e.g., Abutment, Gingivaformer)
+    const prodGroup = lower(p.get("product_group"));    // e.g., Abutment, Gingivaformer, Abformpfosten
 
     // NUMERICS on the PART itself
     const diameter = p.get("diameter_mm");              // prosthetic diameter of the part
@@ -50,13 +56,16 @@ export default async function handler(req) {
     const gingiva = p.get("gingiva_mm");
     const angulation = p.get("angulation_deg");
 
-    // CONNECTION size (implant interface). We accept either param name:
+    // CONNECTION size (implant interface) — accept either param name
     const connection = p.get("connection_mm") || p.get("prothetik_diameter_mm");
 
     // ENUMS
     const abformung = lower(p.get("abformung"));        // "open" | "closed"
     const color = lower(p.get("color"));
-    const variant = lower(p.get("variant"));            // fuzzy across ausfuehrung/rotationsschutz/zubehoer
+    const rotation = parseRotation(p.get("rotationsschutz")); // "with" | "without" | ""
+
+    // fuzzy variants bucket
+    const variant = lower(p.get("variant"));
 
     const limit = Math.max(1, Math.min(50, parseInt(p.get("limit") || "10", 10)));
     const platform = platformIn === "universal" ? "universal" : normPlatform(platformIn);
@@ -83,6 +92,14 @@ export default async function handler(req) {
 
       if (abformung && lower(r.abformung) !== abformung) return false;
       if (color && lower(r.color) !== color) return false;
+
+      if (rotation) {
+        const field = lower(r.rotationsschutz || "");
+        const isWith = field.includes("mit") || field.includes("with") || field.includes("rotation");
+        const isWithout = field.includes("ohne") || field.includes("without");
+        if (rotation === "with" && !isWith) return false;
+        if (rotation === "without" && !isWithout) return false;
+      }
 
       if (variant) {
         const blob = `${lower(r.ausfuehrung)} ${lower(r.rotationsschutz)} ${lower(r.zubehoer)}`;

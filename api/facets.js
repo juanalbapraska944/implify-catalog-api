@@ -5,7 +5,7 @@ let CACHE = { products: null };
 async function loadProducts(req) {
   if (CACHE.products) return CACHE.products;
   const origin = new URL(req.url).origin;
-  const fileUrl = `${origin}/products.jsonl`; // change to /public/products.jsonl if that's where your file is
+  const fileUrl = `${origin}/products.jsonl`;
   const res = await fetch(fileUrl, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to load products.jsonl (${res.status})`);
   const text = await res.text();
@@ -38,6 +38,7 @@ function applyFilters(items, p) {
   const length = p.get("length_mm");
   const gingiva = p.get("gingiva_mm");
   const angulation = p.get("angulation_deg");
+  const prosth = p.get("prothetik_diameter_mm"); // <-- NEW
   const abformung = lower(p.get("abformung"));
   const color = lower(p.get("color"));
   const variant = lower(p.get("variant"));
@@ -60,6 +61,7 @@ function applyFilters(items, p) {
     if (length && !approxEq(r.length_mm, length)) return false;
     if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
     if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
+    if (prosth && !approxEq(r.prothetik_diameter_mm, prosth)) return false; // <-- NEW
 
     if (abformung && lower(r.abformung) !== abformung) return false;
     if (color && lower(r.color) !== color) return false;
@@ -109,6 +111,7 @@ export default async function handler(req) {
       length_mm: { values: countValues(filtered, "length_mm", true) },
       gingiva_mm: { values: countValues(filtered, "gingiva_mm", true) },
       angulation_deg: { values: countValues(filtered, "angulation_deg", true) },
+      prothetik_diameter_mm: { values: countValues(filtered, "prothetik_diameter_mm", true) }, // <-- NEW
       abformung: { values: countValues(filtered, "abformung") },
       ausfuehrung: { values: countValues(filtered, "ausfuehrung") },
       rotationsschutz: { values: countValues(filtered, "rotationsschutz") },

@@ -1,3 +1,4 @@
+// api/search.js
 export const config = { runtime: "edge", regions: ["fra1"] };
 
 let CACHE = { products: null };
@@ -6,7 +7,8 @@ async function loadProducts(req) {
   if (CACHE.products) return CACHE.products;
 
   const origin = new URL(req.url).origin;
-  const fileUrl = `${origin}/products.jsonl`; // file served from /public at site root
+  // Your products.jsonl lives at site root because it's in /public
+  const fileUrl = `${origin}/products.jsonl`;
   const res = await fetch(fileUrl, { cache: "no-store" });
   if (!res.ok) throw new Error(`Failed to load products.jsonl (${res.status})`);
 
@@ -36,22 +38,30 @@ export default async function handler(req) {
     const items = await loadProducts(req);
     const url = new URL(req.url), p = url.searchParams;
 
+    // Query params
     const q = lower(p.get("q"));
     const platformIn = p.get("platform");
-    const group = lower(p.get("group"));
-    const prodGroup = lower(p.get("product_group"));
-    const diameter = p.get("diameter_mm");
+    const group = lower(p.get("group"));                // high-level category
+    const prodGroup = lower(p.get("product_group"));    // product group (e.g., Abutment, Gingivaformer)
+
+    // NUMERICS on the PART itself
+    const diameter = p.get("diameter_mm");              // prosthetic diameter of the part
     const length = p.get("length_mm");
     const gingiva = p.get("gingiva_mm");
     const angulation = p.get("angulation_deg");
-    const prosth = p.get("prothetik_diameter_mm"); // <-- NEW
-    const abformung = lower(p.get("abformung"));
-    const color = lower(p.get("color"));
-    const variant = lower(p.get("variant"));
-    const limit = Math.max(1, Math.min(50, parseInt(p.get("limit") || "10", 10)));
 
+    // CONNECTION size (implant interface). We accept either param name:
+    const connection = p.get("connection_mm") || p.get("prothetik_diameter_mm");
+
+    // ENUMS
+    const abformung = lower(p.get("abformung"));        // "open" | "closed"
+    const color = lower(p.get("color"));
+    const variant = lower(p.get("variant"));            // fuzzy across ausfuehrung/rotationsschutz/zubehoer
+
+    const limit = Math.max(1, Math.min(50, parseInt(p.get("limit") || "10", 10)));
     const platform = platformIn === "universal" ? "universal" : normPlatform(platformIn);
 
+    // Filter
     let result = items.filter((r) => {
       if (q) {
         const hay = `${r.sku||""} ${r.mfg_code||""} ${r.name_de||""} ${r.name_long_de||""}`.toLowerCase();
@@ -64,11 +74,12 @@ export default async function handler(req) {
       if (group && lower(r.group) !== group) return false;
       if (prodGroup && lower(r.product_group) !== prodGroup) return false;
 
-      if (diameter && !approxEq(r.diameter_mm, diameter)) return false;
+      if (diameter && !approxEq(r.diameter_mm, diameter)) return false;                 // part's prosthetic diameter
       if (length && !approxEq(r.length_mm, length)) return false;
       if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
       if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
-      if (prosth && !approxEq(r.prothetik_diameter_mm, prosth)) return false; // <-- NEW
+
+      if (connection && !approxEq(r.prothetik_diameter_mm, connection)) return false;   // implant connection size
 
       if (abformung && lower(r.abformung) !== abformung) return false;
       if (color && lower(r.color) !== color) return false;
@@ -80,6 +91,7 @@ export default async function handler(req) {
       return true;
     });
 
+    // Shape & limit
     result = result.slice(0, limit).map((r) => ({
       sku: r.sku,
       mfg_code: r.mfg_code || null,
@@ -88,11 +100,17 @@ export default async function handler(req) {
       platform_scope: r.platform ? "platform" : "universal",
       product_group: r.product_group || null,
       group: r.group || null,
+
+      // PART measures
       diameter_mm: r.diameter_mm ?? null,
       length_mm: r.length_mm ?? null,
       gingiva_mm: r.gingiva_mm ?? null,
       angulation_deg: r.angulation_deg ?? null,
-      prothetik_diameter_mm: r.prothetik_diameter_mm ?? null, // <-- NEW
+
+      // CONNECTION size
+      connection_mm: r.prothetik_diameter_mm ?? null,
+
+      // Variants
       abformung: r.abformung || null,
       ausfuehrung: r.ausfuehrung || null,
       rotationsschutz: r.rotationsschutz || null,

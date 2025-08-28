@@ -57,7 +57,7 @@ function deriveConnectionMM(r, hintGingiva){
   let cand = toNum(r.Platfform_Prothetikdurchmesser || r.plattform_prothetikdurchmesser || r.platform_prothetikdurchmesser);
   if (cand) return cand;
 
-  // 2) parse from name, prioritizing segments that mention platform keywords
+  // 2) parse from name, prioritizing segments that mention platform/interface keywords
   const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
     .map(norm).filter(Boolean).join(" | ");
   const parens = Array.from(name.matchAll(/\(([^)]+)\)/g)).map(m => m[1]);
@@ -74,7 +74,7 @@ function deriveConnectionMM(r, hintGingiva){
     name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
   }
 
-  // remove values that are really prosthetic diameter or gingiva height; keep plausible connections
+  // remove values that are prosthetic diameter or gingiva height; keep plausible connections
   const partDia = getPartDiameter(r);
   const hint = toNum(hintGingiva);
   const filtered = mm.filter(v =>

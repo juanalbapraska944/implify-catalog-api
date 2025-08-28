@@ -71,7 +71,7 @@ function deriveConnectionMM(r, hintGingiva){
     name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
   }
 
-  // filter out likely prosthetic or gingiva values
+  // filter out likely prosthetic or gingiva values; keep plausible connection range
   const partDia = getPartDiameter(r);
   const hint = toNum(hintGingiva);
   const filtered = mm.filter(v =>
@@ -122,7 +122,7 @@ function applyFilters(items, p) {
     if (gingiva && !approxEq(r.gingiva_mm, gingiva)) return false;
     if (angulation && !approxEq(r.angulation_deg, angulation)) return false;
 
-    const conn = deriveConnectionMM(r, gingiva);
+    const conn = deriveConnectionMM(r, p.get("gingiva_mm"));
     if (connection && !approxEq(conn, connection)) return false;
 
     if (abformung && lower(r.abformung) !== abformung) return false;
@@ -194,9 +194,11 @@ export default async function handler(req) {
       connMap.set(sv, (connMap.get(sv) || 0) + 1);
     }
 
+    // drop singletons (removes spurious one-offs like 5.7)
     const connFacet = Array.from(connMap.entries())
-      .sort((a,b) => b[1]-a[1])
-      .map(([value, count]) => ({ value, count }));
+      .map(([value, count]) => ({ value, count }))
+      .filter(x => x.count >= 2)
+      .sort((a,b) => b.count - a.count);
 
     // --- assemble response ---
     const facets = {

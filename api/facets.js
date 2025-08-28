@@ -49,11 +49,14 @@ function getPartDiameter(r){
   return null;
 }
 function deriveConnectionMM(r, hintGingiva){
+  // try platform connection field first
   let cand = toNum(r.Platfform_Prothetikdurchmesser || r.plattform_prothetikdurchmesser || r.platform_prothetikdurchmesser);
   if (cand) return cand;
 
   const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
     .map(norm).filter(Boolean).join(" | ");
+
+  // Favor numbers inside parentheses that look like platform/interface descriptions
   const parens = Array.from(name.matchAll(/\(([^)]+)\)/g)).map(m => m[1]);
   const pools = parens.length ? parens : [name];
 
@@ -68,6 +71,7 @@ function deriveConnectionMM(r, hintGingiva){
     name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
   }
 
+  // filter out likely prosthetic or gingiva values
   const partDia = getPartDiameter(r);
   const hint = toNum(hintGingiva);
   const filtered = mm.filter(v =>
@@ -161,6 +165,40 @@ export default async function handler(req) {
     const url = new URL(req.url);
     const filtered = applyFilters(items, url.searchParams);
 
+    // --- build clean connection facet ---
+    const diaFacet = countValues(filtered, "diameter_mm", true);
+    const diaSet = new Set(diaFacet.map(x => x.value));   // e.g. "5.0", "6.0"
+    const gingivaHint = url.searchParams.get("gingiva_mm");
+
+    // gather derived connections
+    const rawConn = filtered
+      .map(r => deriveConnectionMM(r, gingivaHint))
+      .filter(v => v != null);
+
+    // normalize: snap 3.75, else 1-decimal
+    function normConn(v){
+      if (Math.abs(v - 3.75) < 0.06) return "3.75";
+      return (Math.round(v * 10) / 10).toFixed(1);
+    }
+
+    const connMap = new Map();
+    for (const v of rawConn) {
+      const sv = normConn(v);
+      const n = parseFloat(sv);
+
+      // plausibility + cleaning rules
+      if (n < 3.0 || n > 6.5) continue;
+      if (gingivaHint && Math.abs(n - parseFloat(gingivaHint)) < 0.11) continue;
+      if (diaSet.has(sv)) continue; // don't surface prosthetic diameters as connection
+
+      connMap.set(sv, (connMap.get(sv) || 0) + 1);
+    }
+
+    const connFacet = Array.from(connMap.entries())
+      .sort((a,b) => b[1]-a[1])
+      .map(([value, count]) => ({ value, count }));
+
+    // --- assemble response ---
     const facets = {
       platform:        { values: countValues(filtered, "platform") },
       platform_scope:  { values: [
@@ -171,28 +209,11 @@ export default async function handler(req) {
       group:           { values: countValues(filtered, "group") },
 
       // NUMERIC facets
-      diameter_mm:     { values: countValues(filtered, "diameter_mm", true) },           // part prosthetic diameter
+      diameter_mm:     { values: countValues(filtered, "diameter_mm", true) },
       length_mm:       { values: countValues(filtered, "length_mm", true) },
       gingiva_mm:      { values: countValues(filtered, "gingiva_mm", true) },
       angulation_deg:  { values: countValues(filtered, "angulation_deg", true) },
-      // Build a cleaned connection facet: drop values that equal gingiva or match current diameter facet
-const diaFacet = countValues(filtered, "diameter_mm", true);
-const diaSet = new Set(diaFacet.map(x => x.value)); // strings like "5.0","6.0"
-const gingivaHint = url.searchParams.get("gingiva_mm");
-
-let connFacet = countValues(filtered, null, true, (r)=>deriveConnectionMM(r, gingivaHint));
-connFacet = connFacet.filter(({ value }) => {
-  // drop if equals gingiva
-  if (gingivaHint && Math.abs(parseFloat(value) - parseFloat(gingivaHint)) < 0.11) return false;
-  // drop if equals any prosthetic diameter value
-  if (diaSet.has(value)) return false;
-  // keep plausible connectors only
-  const v = parseFloat(value);
-  return v >= 3.0 && v <= 6.5;
-});
-
-connection_mm: { values: connFacet },
-
+      connection_mm:   { values: connFacet }, // cleaned, derived
 
       // ENUM facets
       abformung:       { values: countValues(filtered, "abformung") },

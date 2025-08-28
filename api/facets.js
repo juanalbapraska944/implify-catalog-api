@@ -49,13 +49,16 @@ function getPartDiameter(r){
   return null;
 }
 
-// Single-value derivation (used by /api/search and as a candidate here)
+// Derive the IMPLANT CONNECTION size (mm) from structured + name fields
 function deriveConnectionMM(r, hintGingiva){
+  // explicit field (if present)
   let cand = toNum(r.Platfform_Prothetikdurchmesser || r.plattform_prothetikdurchmesser || r.platform_prothetikdurchmesser);
   if (cand) return cand;
 
   const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
     .map(norm).filter(Boolean).join(" | ");
+
+  // prioritize parentheses segments with interface keywords
   const parens = Array.from(name.matchAll(/\(([^)]+)\)/g)).map(m => m[1]);
   const pools = parens.length ? parens : [name];
 
@@ -70,6 +73,7 @@ function deriveConnectionMM(r, hintGingiva){
     name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
   }
 
+  // drop prosthetic/gingiva numbers; keep plausible connection range
   const partDia = getPartDiameter(r);
   const hint = toNum(hintGingiva);
   const filtered = mm.filter(v =>
@@ -81,32 +85,6 @@ function deriveConnectionMM(r, hintGingiva){
   if (filtered.length) return filtered[0];
   if (!partDia && mm.length === 1) return mm[0];
   return null;
-}
-
-// Multi-candidate extraction for facet robustness
-function deriveConnectionCandidates(r, hintGingiva){
-  const out = new Set();
-
-  const primary = deriveConnectionMM(r, hintGingiva);
-  if (primary != null) out.add(primary);
-
-  // Broader scan across name fields (even if no interface keyword matched)
-  const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
-    .map(norm).filter(Boolean).join(" | ");
-  const all = [];
-  name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) all.push(n); return m; });
-
-  const hint = toNum(hintGingiva);
-  const partDia = getPartDiameter(r);
-
-  for (const v of all) {
-    if (v < 3.0 || v > 6.5) continue;            // plausible connection range
-    if (hint!=null && approxEq(v, hint)) continue; // don't surface gingiva height as connection
-    // NOTE: do NOT drop values that equal prosthetic diameter; some connections are 5.0 while part dia is also 5.0
-    out.add(v);
-  }
-
-  return Array.from(out.values());
 }
 
 function applyFilters(items, p) {
@@ -190,7 +168,7 @@ export default async function handler(req) {
     const filtered = applyFilters(items, url.searchParams);
     const gingivaHint = url.searchParams.get("gingiva_mm");
 
-    // --- robust connection facet ---
+    // --- build connection facet from the strict single-value parser only ---
     function normConn(v){
       if (Math.abs(v - 3.75) < 0.06) return "3.75";
       return (Math.round(v * 10) / 10).toFixed(1);
@@ -198,19 +176,23 @@ export default async function handler(req) {
 
     const connMap = new Map();
     for (const r of filtered) {
-      const cands = deriveConnectionCandidates(r, gingivaHint);
-      for (const v of cands) {
-        const sv = normConn(v);
-        const n = parseFloat(sv);
-        if (n < 3.0 || n > 6.5) continue;
-        if (gingivaHint && Math.abs(n - parseFloat(gingivaHint)) < 0.11) continue;
-        connMap.set(sv, (connMap.get(sv) || 0) + 1);
-      }
+      const v = deriveConnectionMM(r, gingivaHint);
+      if (v == null) continue;
+      const n = parseFloat(v);
+      if (n < 3.0 || n > 6.5) continue;
+      if (gingivaHint && Math.abs(n - parseFloat(gingivaHint)) < 0.11) continue;
+
+      const sv = normConn(n);
+      connMap.set(sv, (connMap.get(sv) || 0) + 1);
     }
 
-    const connFacet = Array.from(connMap.entries())
-      .map(([value, count]) => ({ value, count }))
-      .sort((a,b) => b.count - a.count);
+    // remove singletons only if multiple options exist (cleans stray 5.7/6.0 noise)
+    let entries = Array.from(connMap.entries());
+    if (entries.length > 1) entries = entries.filter(([,count]) => count >= 2);
+
+    const connFacet = entries
+      .sort((a,b) => b[1] - a[1])
+      .map(([value, count]) => ({ value, count }));
 
     // --- assemble response ---
     const facets = {
@@ -227,7 +209,7 @@ export default async function handler(req) {
       length_mm:       { values: countValues(filtered, "length_mm", true) },
       gingiva_mm:      { values: countValues(filtered, "gingiva_mm", true) },
       angulation_deg:  { values: countValues(filtered, "angulation_deg", true) },
-      connection_mm:   { values: connFacet }, // robust, derived
+      connection_mm:   { values: connFacet }, // cleaned, derived strictly
 
       // ENUM facets
       abformung:       { values: countValues(filtered, "abformung") },

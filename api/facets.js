@@ -49,14 +49,14 @@ function getPartDiameter(r){
   return null;
 }
 function deriveConnectionMM(r, hintGingiva){
-  // try platform connection field first
+  // try explicit platform connection first
   let cand = toNum(r.Platfform_Prothetikdurchmesser || r.plattform_prothetikdurchmesser || r.platform_prothetikdurchmesser);
   if (cand) return cand;
 
   const name = [r.name_de, r.name_long_de, r.Artikel_Name, r.Artikel_Name_long]
     .map(norm).filter(Boolean).join(" | ");
 
-  // Favor numbers inside parentheses that look like platform/interface descriptions
+  // prioritize parentheses segments containing interface keywords
   const parens = Array.from(name.matchAll(/\(([^)]+)\)/g)).map(m => m[1]);
   const pools = parens.length ? parens : [name];
 
@@ -71,7 +71,7 @@ function deriveConnectionMM(r, hintGingiva){
     name.replace(/(\d+[.,]\d+|\d+)\s*mm/gi, (m) => { const n = toNum(m); if (n!=null) mm.push(n); return m; });
   }
 
-  // filter out likely prosthetic or gingiva values; keep plausible connection range
+  // filter out prosthetic/gingiva numbers; keep plausible connection range
   const partDia = getPartDiameter(r);
   const hint = toNum(hintGingiva);
   const filtered = mm.filter(v =>
@@ -165,9 +165,7 @@ export default async function handler(req) {
     const url = new URL(req.url);
     const filtered = applyFilters(items, url.searchParams);
 
-    // --- build clean connection facet ---
-    const diaFacet = countValues(filtered, "diameter_mm", true);
-    const diaSet = new Set(diaFacet.map(x => x.value));   // e.g. "5.0", "6.0"
+    // --- build clean connection facet (without dropping values that match diameter) ---
     const gingivaHint = url.searchParams.get("gingiva_mm");
 
     // gather derived connections
@@ -189,15 +187,13 @@ export default async function handler(req) {
       // plausibility + cleaning rules
       if (n < 3.0 || n > 6.5) continue;
       if (gingivaHint && Math.abs(n - parseFloat(gingivaHint)) < 0.11) continue;
-      if (diaSet.has(sv)) continue; // don't surface prosthetic diameters as connection
 
       connMap.set(sv, (connMap.get(sv) || 0) + 1);
     }
 
-    // drop singletons (removes spurious one-offs like 5.7)
+    // keep even singletons (some platforms truly have one option)
     const connFacet = Array.from(connMap.entries())
       .map(([value, count]) => ({ value, count }))
-      .filter(x => x.count >= 2)
       .sort((a,b) => b.count - a.count);
 
     // --- assemble response ---
@@ -215,7 +211,7 @@ export default async function handler(req) {
       length_mm:       { values: countValues(filtered, "length_mm", true) },
       gingiva_mm:      { values: countValues(filtered, "gingiva_mm", true) },
       angulation_deg:  { values: countValues(filtered, "angulation_deg", true) },
-      connection_mm:   { values: connFacet }, // cleaned, derived
+      connection_mm:   { values: connFacet }, // cleaned, derived, NOT filtered against diameter
 
       // ENUM facets
       abformung:       { values: countValues(filtered, "abformung") },
